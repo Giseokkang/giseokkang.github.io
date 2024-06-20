@@ -104,7 +104,7 @@ const page: NextAppRouterPage = async ({ params: { id } }) => {
     <SWRProvider
       value={{
         fallback: {
-          [getRecruitmentApiKey(id)]: fetchRecruitmentDetail(id),
+          data: fetchRecruitmentDetail(id),
         },
       }}
     >
