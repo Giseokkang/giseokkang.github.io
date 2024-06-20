@@ -101,7 +101,14 @@ const page: NextAppRouterPage = async ({ params: { id } }) => {
   }
 
   return (
-    <SWRProvider>
+    <SWRProvider
+      value={% raw %}{{
+        fallback: {
+          // swr, fetch, axios에서 api key값을 공유하기 위해 getKey 함수 활용
+          [getRecruitmentApiKey(id)]: fetchRecruitmentDetail(id),
+        },
+      }}{% raw %}
+    >
       <RecruitmentDetail />
     </SWRProvider>
   );
