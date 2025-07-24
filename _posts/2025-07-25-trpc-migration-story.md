@@ -114,25 +114,46 @@ app.get("/user/:id", async (req, res) => {
 
 ### 두 번째 제안: GraphQL 의존성 문제 해결
 
-#### 방안 1: RESTful API로 전환
+#### 방안 1: GraphQL 유지하되 도메인별 분리
+
+기존 GraphQL 방식:
+
+```typescript
+// 모든 도메인이 하나의 리졸버에 섞여있음
+@Query(() => GetAppVersionByPlatformResponseSchema)
+async getAppVersionByPlatform(@Args() args: GetAppVersionByPlatformRequestSchema) {
+    const { response } = await this.appVersionService.getAppVersionByPlatform(args);
+    return response;
+}
+
+@Query(() => GetUserProfileResponseSchema)
+async getUserProfile(@Args() args: GetUserProfileRequestSchema) {
+    const { response } = await this.userService.getUserProfile(args);
+    return response;
+}
+```
+
+**문제점**: 여전히 Code Generation 의존성과 도메인 결합 문제가 남아있음 😰
+
+#### 방안 2: RESTful API로 전환
 
 ```typescript
 // 각 도메인별로 독립적인 REST API
-/api/ersu / profile / api / store / products / api / order / history;
+/api/adimn / app - version / api / store / products / api / webview / config;
 ```
 
 **문제점**: 타입 안전성을 잃어버림 😰
 
 ```typescript
 // 이런 식으로 타입을 따로 정의해야...
-interface UserProfile {
-  id: string;
-  name: string;
-  // 백엔드와 동기화 안 될 가능성 높음
+interface AppVersionResponse {
+  version: string;
+  required: boolean;
+  // 백엔드와 동기화하는데 어려움이 있음
 }
 ```
 
-#### 방안 2: tRPC 도입 🎯
+#### 방안 3: tRPC 도입 🎯
 
 "잠깐, tRPC라는 게 있던데... NestJS에서 사용할 수 있을까?"
 
@@ -148,7 +169,7 @@ interface UserProfile {
 
 ```
 v2/modules/
-├── solve-books/          # 메인 서비스
+├── solve-books/          # 스토어 서비스
 │   ├── contents/         # 콘텐츠 관리
 │   ├── partner/          # 파트너 관리
 │   ├── solve/            # 문제 풀이
@@ -158,8 +179,8 @@ v2/modules/
 │       ├── orders/
 │       ├── payments/
 │       └── products/
-├── admin/               # 관리자
-├── webview-v2/          # 웹뷰
+├── admin/               # 관리자 서비스
+├── webview-v2/          # 웹뷰 서비스
 └── trpc/               # tRPC 설정
 ```
 
@@ -207,20 +228,28 @@ import { Product } from "./products/product.schema";
 
 ### 1. NestJS 기반 백엔드 플랫폼 구축
 
-#### 기존 Go gRPC 방식
+#### 기존 GraphQL 방식
 
-```go
-// user.proto
-service UserService {
-  rpc GetUserProfile(GetUserRequest) returns (UserResponse);
+```typescript
+// GraphQL 리졸버 - 복잡한 데코레이터와 스키마 정의
+@Query(() => GetAppVersionByPlatformResponseSchema)
+async getAppVersionByPlatform(@Args() args: GetAppVersionByPlatformRequestSchema) {
+    const { response } = await this.appVersionService.getAppVersionByPlatform(args);
+    return response;
 }
 
-// 복잡한 protobuf 정의 필요
-message UserResponse {
-  string id = 1;
-  string name = 2;
-  UserProfile profile = 3;
+@Query(() => GetUserProfileResponseSchema)
+async getUserProfile(@Args() args: GetUserProfileRequestSchema) {
+    const { response } = await this.userService.getUserProfile(args);
+    return response;
 }
+
+// 별도의 스키마 파일 필요
+export const GetUserProfileResponseSchema = ObjectType(() => ({
+  id: () => String,
+  name: () => String,
+  profile: () => UserProfileSchema,
+}));
 ```
 
 #### 새로운 tRPC 방식
@@ -262,17 +291,26 @@ $ npm run type-check
 // 4. 하나씩 수정하고 다시...
 $ npm run codegen
 $ npm run type-check
+
+// 5. 실제 사용 코드
+const { data, loading, error } = useGetUserProfileQuery({
+  variables: { userId: "123" },
+  fetchPolicy: 'cache-and-network'
+});
+
+// 복잡한 타입 체인
+const userName = data?.getUserProfile?.profile?.basicInfo?.name;
 ```
 
 #### 새로운 tRPC 방식
 
 ```typescript
 // 백엔드 스키마 변경하면 즉시 타입 동기화!
-const { data } = trpc.store.products.getById.useQuery({ id: "123" });
-//     ^? Product 타입이 자동으로 추론됨 ✨
+const { data } = trpc.user.getProfile.useQuery({ userId: "123" });
+//     ^? User 타입이 자동으로 추론됨 ✨
 
 // 백엔드에서 필드 추가하면 여기서도 바로 사용 가능!
-console.log(data?.newField); // 타입 안전!
+const userName = data?.displayName; // 타입 안전하고 간단!
 ```
 
 ### 3. TanStack Query와의 조합
@@ -313,9 +351,9 @@ const { data, isLoading, error, refetch } = trpc.store.products.list.useQuery(
 #### Before: 복잡한 프로세스 😰
 
 ```
-1. 요구사항 → 백엔드팀 문의
-2. Go 서버 수정 → protobuf 정의
-3. Code Generation → 모든 프로젝트 빌드 테스트
+1. 요구사항 → GraphQL 스키마 수정 논의
+2. 스키마 변경 → Code Generation 실행
+3. 모든 프로젝트 빌드 테스트 → 타입 에러 수정
 4. 에러 발생 → 다시 1번부터...
 ⏱️ 평균 2-3일 소요
 ```
